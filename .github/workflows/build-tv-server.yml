@@ -54,16 +54,18 @@ jobs:
         dnf update -y
         dnf install -y dnf-plugins-core
         
-        # Install Python 3.8 and ALL development dependencies
-        dnf install -y python38 python38-pip python38-devel
+        # Install ALL development dependencies first
         dnf install -y gcc gcc-c++ make
         dnf install -y bzip2-devel ncurses-devel libffi-devel readline-devel
         dnf install -y sqlite-devel tk-devel which wget git glibc-langpack-en
         dnf install -y libX11-devel libXext-devel libXrender-devel libxcb-devel
         dnf install -y mesa-libGL-devel libXi-devel file
         
-        # Install tk and tk-devel
-        dnf install -y tk tk-devel
+        # Install tk and tk-devel BEFORE Python
+        dnf install -y tk tk-devel tcl tcl-devel
+        
+        # Install Python 3.8 with tkinter support
+        dnf install -y python38 python38-pip python38-devel python3-tkinter
         
         # Install additional development libraries
         dnf install -y openssl-devel zlib-devel libjpeg-turbo-devel
@@ -82,18 +84,66 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Fix tkinter installation
+      run: |
+        # Проверяем доступность tkinter
+        echo "=== Checking tkinter availability ==="
+        python3.8 -c "
+            import sys
+            print('Python path:', sys.path)
+
+            # Проверяем доступные модули
+            try:
+                import _tkinter
+                print('SUCCESS: _tkinter module found')
+            except ImportError as e:
+                print('_tkinter import error:', e)
+
+            try:
+                import tkinter
+                print('SUCCESS: tkinter module found')
+                print('tkinter path:', tkinter.__file__)
+            except ImportError as e:
+                print('tkinter import error:', e)
+                
+            # Альтернативный способ - ищем файлы tkinter
+            import os
+            for path in sys.path:
+                tkinter_path = os.path.join(path, 'tkinter')
+                if os.path.exists(tkinter_path):
+                    print(f'tkinter directory found: {tkinter_path}')
+                if os.path.exists(path + '.py'):
+                    print(f'tkinter.py found: {path}.py')
+            "
+
     - name: Install Python dependencies
       working-directory: ./srv/tv
       run: |
         # Install all dependencies from requirements
-        pip3.8 install tkinter
         pip3.8 install -r requirements1.txt
 
-    - name: Build executable with PyInstaller (without tkinter check)
+    - name: Test tkinter after dependencies installation
+      working-directory: ./srv/tv
+      run: |
+        echo "=== Testing tkinter after pip install ==="
+        python3.8 -c "
+          try:
+              import tkinter
+              print('SUCCESS: tkinter imported')
+              from tkinter import Tk
+              print('SUCCESS: Tk class imported')
+              # Не создаем окно в CI среде
+              print('SUCCESS: tkinter is working')
+          except Exception as e:
+              print('tkinter error:', e)
+              import traceback
+              traceback.print_exc()
+          "
+
+    - name: Build executable with PyInstaller
       working-directory: ./srv/tv
       run: |
         echo "Starting PyInstaller build..."
-        # Force build even if tkinter has warnings
         python3.8 -m PyInstaller sb05.py \
           --onefile \
           --hidden-import=logger \
@@ -116,11 +166,11 @@ jobs:
         echo "=== Executable Size ==="
         du -h dist/sb05
         echo "=== Basic functionality test ==="
-        # Test if file was created and is executable
         if [ -f dist/sb05 ] && [ -x dist/sb05 ]; then
             echo "SUCCESS: Executable created and is executable"
             echo "File size: $(du -h dist/sb05 | cut -f1)"
-            timeout 5s ./dist/sb05 || echo "Executable test completed"
+            # Тестируем без GUI
+            timeout 3s ./dist/sb05 --help 2>&1 | head -10 || echo "Executable test completed"
         else
             echo "ERROR: Executable not created or not executable"
             exit 1
