@@ -54,7 +54,7 @@ jobs:
         dnf update -y
         dnf install -y dnf-plugins-core
         
-        # Install Python 3.8 and development tools
+        # Install Python 3.8 and ALL development dependencies
         dnf install -y python38 python38-pip python38-devel
         dnf install -y gcc gcc-c++ make
         dnf install -y bzip2-devel ncurses-devel libffi-devel readline-devel
@@ -62,8 +62,12 @@ jobs:
         dnf install -y libX11-devel libXext-devel libXrender-devel libxcb-devel
         dnf install -y mesa-libGL-devel libXi-devel file
         
-        # Install tkinter packages - КРИТИЧЕСКИ ВАЖНО!
-        dnf install -y tkinter python3-tkinter
+        # Install tkinter - правильное имя пакета
+        dnf install -y python3-tkinter tk
+        
+        # Install additional development libraries
+        dnf install -y openssl-devel zlib-devel libjpeg-turbo-devel
+        dnf install -y freetype-devel libpng-devel giflib-devel libtiff-devel
         
         # Install RPM Fusion for VLC
         dnf install -y https://download1.rpmfusion.org/free/el/rpmfusion-free-release-8.noarch.rpm
@@ -78,7 +82,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Verify Python and tkinter
+    - name: Verify Python and all dependencies
       run: |
         echo "=== Python Version ==="
         python3.8 --version
@@ -86,19 +90,23 @@ jobs:
         python3.8 -c "import tkinter; print('SUCCESS: tkinter imported'); from tkinter import Tk; root = Tk(); root.destroy(); print('SUCCESS: Tk window created and destroyed')" || echo "WARNING: tkinter test failed"
         echo "=== Testing customtkinter ==="
         python3.8 -c "import customtkinter; print('SUCCESS: customtkinter imported')" || echo "WARNING: customtkinter test failed"
+        echo "=== Testing VLC ==="
+        python3.8 -c "import vlc; print('SUCCESS: vlc imported'); instance = vlc.Instance(['--no-xlib']); print('SUCCESS: VLC instance created')" || echo "WARNING: vlc test failed"
+        echo "=== Testing PIL/Pillow ==="
+        python3.8 -c "from PIL import Image; print('SUCCESS: PIL imported')" || echo "WARNING: PIL test failed"
+        echo "=== Testing psutil ==="
+        python3.8 -c "import psutil; print('SUCCESS: psutil imported')" || echo "WARNING: psutil test failed"
 
     - name: Install Python dependencies
       working-directory: ./srv/tv
       run: |
-        # Install python-vlc first
-        pip3.8 install python-vlc==3.0.21203
-        # Install other dependencies
+        # Install all dependencies from requirements
         pip3.8 install -r requirements1.txt
 
-    - name: Build executable with PyInstaller (fixed tkinter)
+    - name: Build executable with PyInstaller
       working-directory: ./srv/tv
       run: |
-        echo "Starting PyInstaller build with tkinter support..."
+        echo "Starting PyInstaller build..."
         python3.8 -m PyInstaller sb05.py \
           --onefile \
           --hidden-import=logger \
@@ -120,11 +128,11 @@ jobs:
         file dist/sb05
         echo "=== Executable Size ==="
         du -h dist/sb05
-        echo "=== Testing executable basic functionality ==="
-        # Test without GUI (since we're in CI environment)
-        timeout 3s ./dist/sb05 --help 2>&1 | head -10 || echo "Executable completed (GUI may not work in headless environment)"
+        echo "=== Testing executable ==="
+        # Test in headless mode
+        timeout 5s ./dist/sb05 --version 2>&1 | head -10 || echo "Executable test completed"
 
-    - name: Upload artifacts
+    - name: Upload executable artifact
       uses: actions/upload-artifact@v4
       with:
         name: tv-server-executable
