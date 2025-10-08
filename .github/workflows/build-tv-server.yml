@@ -67,7 +67,7 @@ jobs:
         
         # Install additional development libraries
         dnf install -y openssl-devel zlib-devel libjpeg-turbo-devel
-        dnf install -y freetype-devel libpng-devel giflib-devel libtiff-devel
+        dnf install -y freetype-devel libpng-devel libtiff-devel
         
         # Install RPM Fusion for VLC
         dnf install -y https://download1.rpmfusion.org/free/el/rpmfusion-free-release-8.noarch.rpm
