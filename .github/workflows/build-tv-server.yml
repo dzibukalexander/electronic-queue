@@ -86,7 +86,7 @@ jobs:
       working-directory: ./srv/tv
       run: |
         # Install all dependencies from requirements
-        pip3.8 install tk
+        pip3.8 install tkinter
         pip3.8 install -r requirements1.txt
 
     - name: Build executable with PyInstaller (without tkinter check)
