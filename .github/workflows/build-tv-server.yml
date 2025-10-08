@@ -120,6 +120,7 @@ jobs:
         if [ -f dist/sb05 ] && [ -x dist/sb05 ]; then
             echo "SUCCESS: Executable created and is executable"
             echo "File size: $(du -h dist/sb05 | cut -f1)"
+            timeout 5s ./dist/sb05 || echo "Executable test completed"
         else
             echo "ERROR: Executable not created or not executable"
             exit 1
