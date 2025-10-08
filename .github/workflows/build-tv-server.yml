@@ -62,8 +62,9 @@ jobs:
         dnf install -y libX11-devel libXext-devel libXrender-devel libxcb-devel
         dnf install -y mesa-libGL-devel libXi-devel file
         
-        # Install tkinter - правильное имя пакета
-        dnf install -y python3-tkinter tk
+        # Install tkinter - правильные пакеты для CentOS 8
+        dnf install -y tk tk-devel
+        dnf install -y python3-tkinter
         
         # Install additional development libraries
         dnf install -y openssl-devel zlib-devel libjpeg-turbo-devel
@@ -81,6 +82,34 @@ jobs:
 
     - name: Checkout code
       uses: actions/checkout@v4
+
+    - name: Test tkinter separately
+      run: |
+        echo "=== Testing system tkinter ==="
+        # Проверяем установлен ли tkinter системно
+        python3.8 -c "import sys; print('Python path:', sys.path)"
+        find /usr -name "tkinter" -type d 2>/dev/null
+        find /usr -name "*tkinter*" -type f 2>/dev/null | head -10
+        
+        # Пробуем разные способы импорта
+        echo "=== Testing direct import ==="
+        python3.8 -c "
+          try:
+              import _tkinter
+              print('SUCCESS: _tkinter imported')
+          except Exception as e:
+              print('_tkinter error:', e)
+              
+          try:
+              import tkinter
+              print('SUCCESS: tkinter imported')
+              from tkinter import Tk
+              root = Tk()
+              root.destroy()
+              print('SUCCESS: Tk window created')
+          except Exception as e:
+              print('tkinter error:', e)
+          "
 
     - name: Install Python dependencies
       working-directory: ./srv/tv
