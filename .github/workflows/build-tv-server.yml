@@ -84,66 +84,11 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Fix tkinter installation
-      run: |
-        # Проверяем доступность tkinter
-        echo "=== Checking tkinter availability ==="
-        python3.8 -c "import sys; print('Python path:', sys.path)"
-        
-        # Проверяем доступные модули
-        python3.8 -c "
-try:
-    import _tkinter
-    print('SUCCESS: _tkinter module found')
-except ImportError as e:
-    print('_tkinter import error:', e)
-"
-        
-        python3.8 -c "
-try:
-    import tkinter
-    print('SUCCESS: tkinter module found')
-    print('tkinter path:', tkinter.__file__)
-except ImportError as e:
-    print('tkinter import error:', e)
-"
-        
-        # Альтернативный способ - ищем файлы tkinter
-        python3.8 -c "
-import os
-import sys
-for path in sys.path:
-    tkinter_path = os.path.join(path, 'tkinter')
-    if os.path.exists(tkinter_path):
-        print(f'tkinter directory found: {tkinter_path}')
-    tkinter_file = os.path.join(path, 'tkinter.py')
-    if os.path.exists(tkinter_file):
-        print(f'tkinter.py found: {tkinter_file}')
-"
-
     - name: Install Python dependencies
       working-directory: ./srv/tv
       run: |
         # Install all dependencies from requirements
         pip3.8 install -r requirements1.txt
-
-    - name: Test tkinter after dependencies installation
-      working-directory: ./srv/tv
-      run: |
-        echo "=== Testing tkinter after pip install ==="
-        python3.8 -c "
-try:
-    import tkinter
-    print('SUCCESS: tkinter imported')
-    from tkinter import Tk
-    print('SUCCESS: Tk class imported')
-    # Не создаем окно в CI среде
-    print('SUCCESS: tkinter is working')
-except Exception as e:
-    print('tkinter error:', e)
-    import traceback
-    traceback.print_exc()
-"
 
     - name: Build executable with PyInstaller
       working-directory: ./srv/tv
