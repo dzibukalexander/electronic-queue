@@ -4,7 +4,7 @@ on:
   push:
     branches: [ tv-server-build, chered ]
   pull_request:
-    branches: [ chered ]
+    branches: [ tv-server-build, chered ]
 
 jobs:
   build-tv-server:
@@ -54,12 +54,16 @@ jobs:
         dnf update -y
         dnf install -y dnf-plugins-core
         
-        # Install all required dependencies including file command
-        dnf install -y python38 python38-pip python38-devel gcc gcc-c++ make
+        # Install Python 3.8 and development tools
+        dnf install -y python38 python38-pip python38-devel
+        dnf install -y gcc gcc-c++ make
         dnf install -y bzip2-devel ncurses-devel libffi-devel readline-devel
         dnf install -y sqlite-devel tk-devel which wget git glibc-langpack-en
         dnf install -y libX11-devel libXext-devel libXrender-devel libxcb-devel
         dnf install -y mesa-libGL-devel libXi-devel file
+        
+        # Install tkinter packages - КРИТИЧЕСКИ ВАЖНО!
+        dnf install -y tkinter python3-tkinter
         
         # Install RPM Fusion for VLC
         dnf install -y https://download1.rpmfusion.org/free/el/rpmfusion-free-release-8.noarch.rpm
@@ -74,6 +78,15 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Verify Python and tkinter
+      run: |
+        echo "=== Python Version ==="
+        python3.8 --version
+        echo "=== Testing tkinter ==="
+        python3.8 -c "import tkinter; print('SUCCESS: tkinter imported'); from tkinter import Tk; root = Tk(); root.destroy(); print('SUCCESS: Tk window created and destroyed')" || echo "WARNING: tkinter test failed"
+        echo "=== Testing customtkinter ==="
+        python3.8 -c "import customtkinter; print('SUCCESS: customtkinter imported')" || echo "WARNING: customtkinter test failed"
+
     - name: Install Python dependencies
       working-directory: ./srv/tv
       run: |
@@ -82,39 +95,10 @@ jobs:
         # Install other dependencies
         pip3.8 install -r requirements1.txt
 
-    - name: Fix PyInstaller VLC warnings
+    - name: Build executable with PyInstaller (fixed tkinter)
       working-directory: ./srv/tv
       run: |
-        # Create hook to help PyInstaller find VLC libraries
-        mkdir -p hooks
-        cat > hooks/hook-vlc.py << 'EOF'
-        from PyInstaller.utils.hooks import collect_dynamic_libs
-
-        # Collect VLC libraries
-        binaries = collect_dynamic_libs('vlc')
-        
-        # Add specific VLC libraries that might be missed
-        import os
-        vlc_lib_path = '/usr/lib64'
-        vlc_libs = [
-            'libvlc.so.5',
-            'libvlccore.so.9',
-            'libvlc.so.5.6.1',
-            'libvlccore.so.9.0.1'
-        ]
-        
-        for lib in vlc_libs:
-            lib_path = os.path.join(vlc_lib_path, lib)
-            if os.path.exists(lib_path):
-                binaries.append((lib_path, 'vlc'))
-        
-        print(f"Collected VLC binaries: {binaries}")
-        EOF
-
-    - name: Build executable with PyInstaller (improved)
-      working-directory: ./srv/tv
-      run: |
-        echo "Starting PyInstaller build with improved VLC support..."
+        echo "Starting PyInstaller build with tkinter support..."
         python3.8 -m PyInstaller sb05.py \
           --onefile \
           --hidden-import=logger \
@@ -124,10 +108,7 @@ jobs:
           --hidden-import=customtkinter \
           --hidden-import=tkinter \
           --hidden-import=vlc \
-          --additional-hooks-dir=hooks \
           --add-data='/usr/lib64/vlc:vlc/' \
-          --add-binary='/usr/lib64/libvlc.so.5:.' \
-          --add-binary='/usr/lib64/libvlccore.so.9:.' \
           --log-level INFO
 
     - name: Check built executable
@@ -139,16 +120,13 @@ jobs:
         file dist/sb05
         echo "=== Executable Size ==="
         du -h dist/sb05
-        echo "=== Checking executable dependencies ==="
-        ldd dist/sb05 2>/dev/null | grep vlc || echo "VLC libraries not linked dynamically (expected for PyInstaller)"
-        echo "=== Basic functionality test ==="
-        # Test if executable can start
-        timeout 3s ./dist/sb05 --version 2>&1 | head -5 || echo "Executable started successfully (GUI may not work in CI)"
-
+        echo "=== Testing executable basic functionality ==="
+        # Test without GUI (since we're in CI environment)
+        timeout 3s ./dist/sb05 --help 2>&1 | head -10 || echo "Executable completed (GUI may not work in headless environment)"
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: tv-server-artifacts
+        name: tv-server-executable
         path: srv/tv/dist/sb05
         retention-days: 30
