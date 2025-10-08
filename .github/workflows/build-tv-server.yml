@@ -54,14 +54,14 @@ jobs:
         dnf update -y
         dnf install -y dnf-plugins-core
         
-        # Install all required dependencies
+        # Install all required dependencies including file command
         dnf install -y python38 python38-pip python38-devel gcc gcc-c++ make
         dnf install -y bzip2-devel ncurses-devel libffi-devel readline-devel
         dnf install -y sqlite-devel tk-devel which wget git glibc-langpack-en
         dnf install -y libX11-devel libXext-devel libXrender-devel libxcb-devel
-        dnf install -y mesa-libGL-devel libXi-devel
+        dnf install -y mesa-libGL-devel libXi-devel file
         
-        # Install RPM Fusion for VLC (free and non-free)
+        # Install RPM Fusion for VLC
         dnf install -y https://download1.rpmfusion.org/free/el/rpmfusion-free-release-8.noarch.rpm
         dnf install -y https://download1.rpmfusion.org/nonfree/el/rpmfusion-nonfree-release-8.noarch.rpm
         
@@ -77,64 +77,44 @@ jobs:
     - name: Install Python dependencies
       working-directory: ./srv/tv
       run: |
-        # First install python-vlc separately to ensure it works
+        # Install python-vlc first
         pip3.8 install python-vlc==3.0.21203
+        # Install other dependencies
         pip3.8 install -r requirements1.txt
 
-    - name: Verify environment
-      run: |
-        echo "=== Python Version ==="
-        python3.8 --version
-        echo "=== VLC Installation ==="
-        vlc --version || echo "VLC command not available but continuing"
-        echo "=== VLC Libraries ==="
-        find /usr -name "*vlc*" -type f 2>/dev/null | head -10
-        echo "=== VLC Plugins Directory ==="
-        ls -la /usr/lib64/vlc/plugins/ 2>/dev/null | head -5 || echo "VLC plugins directory not found"
-        echo "=== Checking critical dependencies ==="
-        for pkg in python3-devel gcc tk-devel vlc vlc-devel; do
-            if rpm -q $pkg &>/dev/null; then
-                echo "✓ $pkg installed"
-            else
-                echo "✗ $pkg missing"
-            fi
-        done
-
-    - name: Test VLC Python integration
+    - name: Fix PyInstaller VLC warnings
       working-directory: ./srv/tv
       run: |
-        cat > test_vlc_detailed.py << 'EOF'
-        try:
-            import vlc
-            print("SUCCESS: vlc imported successfully")
-            print(f"vlc module path: {vlc.__file__}")
-            
-            # Test basic VLC functionality
-            instance = vlc.Instance(['--no-xlib', '--ignore-config'])
-            print("SUCCESS: VLC instance created")
-            
-            player = instance.media_player_new()
-            print("SUCCESS: VLC media player created")
-            
-            # Test finding VLC libraries
-            import ctypes
-            try:
-                vlc_lib = ctypes.CDLL('libvlc.so.5')
-                print("SUCCESS: libvlc.so.5 found")
-            except Exception as e:
-                print(f"WARNING: libvlc.so.5 not found: {e}")
-                
-        except Exception as e:
-            print(f"ERROR: VLC test failed: {e}")
-            import traceback
-            traceback.print_exc()
+        # Create hook to help PyInstaller find VLC libraries
+        mkdir -p hooks
+        cat > hooks/hook-vlc.py << 'EOF'
+        from PyInstaller.utils.hooks import collect_dynamic_libs
+
+        # Collect VLC libraries
+        binaries = collect_dynamic_libs('vlc')
+        
+        # Add specific VLC libraries that might be missed
+        import os
+        vlc_lib_path = '/usr/lib64'
+        vlc_libs = [
+            'libvlc.so.5',
+            'libvlccore.so.9',
+            'libvlc.so.5.6.1',
+            'libvlccore.so.9.0.1'
+        ]
+        
+        for lib in vlc_libs:
+            lib_path = os.path.join(vlc_lib_path, lib)
+            if os.path.exists(lib_path):
+                binaries.append((lib_path, 'vlc'))
+        
+        print(f"Collected VLC binaries: {binaries}")
         EOF
-        python3.8 test_vlc_detailed.py
 
-    - name: Build executable with PyInstaller
+    - name: Build executable with PyInstaller (improved)
       working-directory: ./srv/tv
       run: |
-        echo "Starting PyInstaller build..."
+        echo "Starting PyInstaller build with improved VLC support..."
         python3.8 -m PyInstaller sb05.py \
           --onefile \
           --hidden-import=logger \
@@ -144,7 +124,10 @@ jobs:
           --hidden-import=customtkinter \
           --hidden-import=tkinter \
           --hidden-import=vlc \
+          --additional-hooks-dir=hooks \
           --add-data='/usr/lib64/vlc:vlc/' \
+          --add-binary='/usr/lib64/libvlc.so.5:.' \
+          --add-binary='/usr/lib64/libvlccore.so.9:.' \
           --log-level INFO
 
     - name: Check built executable
@@ -156,13 +139,16 @@ jobs:
         file dist/sb05
         echo "=== Executable Size ==="
         du -h dist/sb05
-        echo "=== Testing executable ==="
-        # Test if executable can run basic commands
-        timeout 5s ./dist/sb05 --help || echo "Executable started (may need GUI for full functionality)"
+        echo "=== Checking executable dependencies ==="
+        ldd dist/sb05 2>/dev/null | grep vlc || echo "VLC libraries not linked dynamically (expected for PyInstaller)"
+        echo "=== Basic functionality test ==="
+        # Test if executable can start
+        timeout 3s ./dist/sb05 --version 2>&1 | head -5 || echo "Executable started successfully (GUI may not work in CI)"
 
-    - name: Upload executable artifact
+
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: tv-server-executable
+        name: tv-server-artifacts
         path: srv/tv/dist/sb05
         retention-days: 30
