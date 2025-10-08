@@ -82,7 +82,14 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Install Python dependencies
+      working-directory: ./srv/tv
+      run: |
+        # Install all dependencies from requirements
+        pip3.8 install -r requirements1.txt
+
     - name: Verify Python and all dependencies
+      working-directory: ./srv/tv
       run: |
         echo "=== Python Version ==="
         python3.8 --version
@@ -96,12 +103,6 @@ jobs:
         python3.8 -c "from PIL import Image; print('SUCCESS: PIL imported')" || echo "WARNING: PIL test failed"
         echo "=== Testing psutil ==="
         python3.8 -c "import psutil; print('SUCCESS: psutil imported')" || echo "WARNING: psutil test failed"
-
-    - name: Install Python dependencies
-      working-directory: ./srv/tv
-      run: |
-        # Install all dependencies from requirements
-        pip3.8 install -r requirements1.txt
 
     - name: Build executable with PyInstaller
       working-directory: ./srv/tv
