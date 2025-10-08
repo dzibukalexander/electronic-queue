@@ -2,47 +2,58 @@ name: Build TV Server
 
 on:
   push:
-    branches: [ chered, tv-server-build ]
+    branches: [ tv-server-build, chered ]
   pull_request:
-    branches: [ chered ]
+    branches: [ tv-server-build, chered ]
 
 jobs:
   build-tv-server:
     runs-on: ubuntu-latest
     container:
-      image: centos:8
+      image: quay.io/centos/centos:stream8
       
     steps:
     - name: Install system dependencies
       run: |
-        dnf update -y
+        # Update package lists and install basic dependencies
+        dnf install -y dnf-plugins-core
+        dnf config-manager --set-enabled powertools
         dnf install -y epel-release
+        dnf update -y
+        
+        # Install development tools and Python 3.8
         dnf install -y python38 python38-pip python38-devel gcc gcc-c++ make \
         tk-devel bzip2-devel ncurses-devel libffi-devel readline-devel \
-        sqlite-devel which wget git
+        sqlite-devel which wget git glibc-langpack-en
         
-        # Install VLC
-        dnf install -y https://download1.rpmfusion.org/free/el/rpmfusion-free-release-8.noarch.rpm
-        dnf install -y vlc vlc-devel
+        # Install VLC from EPEL
+        dnf install -y vlc vlc-devel vlc-core
         
-        # Install PyInstaller directly
+        # Install PyInstaller
         pip3.8 install pyinstaller==6.14.2
 
     - name: Checkout code
       uses: actions/checkout@v4
-
-    - name: Change to tv project directory
-      run: cd srv/tv
 
     - name: Install Python dependencies
       working-directory: ./srv/tv
       run: |
         pip3.8 install -r requirements1.txt
 
-    - name: Build executable with PyInstaller
+    - name: Verify Python and VLC versions
+      run: |
+        python3.8 --version
+        vlc --version
+        echo "VLC library path:"
+        find /usr -name "libvlc.so" 2>/dev/null || true
+        find /usr -name "libvlccore.so" 2>/dev/null || true
+        echo "VLC plugins directory:"
+        find /usr -type d -name "vlc" 2>/dev/null || true
+
+    - name: Build executable with PyInstaller (original command)
       working-directory: ./srv/tv
       run: |
-        # Modified build command for CentOS 8
+        # Use the original build command from the project
         python3.8 -m PyInstaller sb05.py \
           --onefile \
           --hidden-import=logger \
@@ -52,46 +63,73 @@ jobs:
           --hidden-import=customtkinter \
           --hidden-import=tkinter \
           --hidden-import=vlc \
-          --add-data='videos/:videos/' \
-          --add-data='images/:images/' \
-          --add-data='sb05_set.json:.' \
-          --add-data='sb05_wplace.json:.' \
-          --distpath ./dist-centos
+          --add-data='/usr/lib64/vlc:vlc/'
 
-    - name: List build artifacts
+    - name: List build artifacts and check VLC data
       working-directory: ./srv/tv
       run: |
-        ls -la dist-centos/
-        find dist-centos/ -type f -name "sb05*" -exec file {} \;
+        echo "=== Build artifacts ==="
+        ls -la dist/
+        echo "=== Checking if VLC files are included ==="
+        # Check if VLC libraries are bundled
+        if [ -f dist/sb05 ]; then
+          strings dist/sb05 | grep -i vlc | head -10
+        fi
 
     - name: Upload executable artifact
       uses: actions/upload-artifact@v4
       with:
         name: tv-server-executable
-        path: srv/tv/dist-centos/sb05
+        path: srv/tv/dist/sb05
         retention-days: 30
 
-    - name: Create release package
+    - name: Create deployment package
       working-directory: ./srv/tv
       run: |
-        mkdir -p tv-server-package
-        cp -r videos/ images/ sb05_set.json sb05_wplace.json tv-server-package/
-        cp dist-centos/sb05 tv-server-package/
+        # Create package with all necessary files
+        mkdir -p tv-server-deploy
+        cp -r videos/ images/ sb05_set.json sb05_wplace.json tv-server-deploy/
+        cp dist/sb05 tv-server-deploy/
         
-        # Create a simple run script
-        cat > tv-server-package/run.sh << 'EOF'
+        # Create deployment script
+        cat > tv-server-deploy/deploy.sh << 'EOF'
         #!/bin/bash
+        echo "TV Server Deployment"
+        echo "===================="
+        
+        # Check if running on CentOS/RHEL
+        if [ -f /etc/redhat-release ]; then
+            echo "Detected CentOS/RHEL system"
+            # Install VLC if not present
+            if ! command -v vlc &> /dev/null; then
+                echo "Installing VLC..."
+                sudo dnf install -y vlc
+            fi
+        else
+            echo "Please make sure VLC is installed on your system"
+            echo "Ubuntu/Debian: sudo apt install vlc"
+            echo "CentOS/RHEL: sudo dnf install vlc"
+        fi
+        
+        # Make executable
         chmod +x sb05
-        ./sb05
+        
+        echo ""
+        echo "To run the TV server:"
+        echo "./sb05"
+        echo ""
+        echo "Make sure VLC is installed for video playback functionality"
         EOF
-        chmod +x tv-server-package/run.sh
+        
+        chmod +x tv-server-deploy/deploy.sh
         
         # Create package
-        tar -czf tv-server-package.tar.gz tv-server-package/
+        tar -czf tv-server-deploy.tar.gz tv-server-deploy/
+        echo "Package created: tv-server-deploy.tar.gz"
 
-    - name: Upload complete package
+    - name: Upload deployment package
       uses: actions/upload-artifact@v4
       with:
-        name: tv-server-complete-package
-        path: srv/tv/tv-server-package.tar.gz
+        name: tv-server-deployment-package
+        path: srv/tv/tv-server-deploy.tar.gz
         retention-days: 30
