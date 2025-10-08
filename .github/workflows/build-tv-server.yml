@@ -39,6 +39,12 @@ jobs:
         gpgcheck=0
         enabled=1
 
+        [crb]
+        name=CentOS Stream $releasever - CRB
+        baseurl=http://mirror.hostnet.nl/centos/8-stream/CRB/x86_64/os/
+        gpgcheck=0
+        enabled=1
+
         [epel]
         name=Extra Packages for Enterprise Linux $releasever - $basearch
         baseurl=https://download-ib01.fedoraproject.org/pub/epel/8/Everything/x86_64
@@ -53,9 +59,9 @@ jobs:
       run: |
         dnf update -y
         dnf install -y dnf-plugins-core
-        dnf config-manager --set-enabled powertools
+        dnf config-manager --set-enabled crb
         
-        # Install all required dependencies from your list
+        # Install all required dependencies
         dnf install -y python38 python38-pip python38-devel gcc gcc-c++ make
         dnf install -y bzip2-devel ncurses-devel libffi-devel readline-devel
         dnf install -y sqlite-devel tk-devel which wget git glibc-langpack-en
