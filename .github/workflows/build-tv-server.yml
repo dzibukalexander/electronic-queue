@@ -13,9 +13,9 @@ jobs:
       image: quay.io/centos/centos:stream8
       
     steps:
-    - name: Fix CentOS 8 Stream repositories
+    - name: Fix CentOS Stream 8 repositories
       run: |
-        # Remove broken repositories
+        # Clean existing repos
         dnf clean all
         rm -rf /etc/yum.repos.d/*.repo
         
@@ -23,24 +23,24 @@ jobs:
         cat > /etc/yum.repos.d/centos.repo << 'EOF'
         [baseos]
         name=CentOS Stream $releasever - BaseOS
-        baseurl=https://dl.rockylinux.org/pub/rocky/8.9/BaseOS/x86_64/os/
+        baseurl=https://mirror.centos.org/centos/8-stream/BaseOS/x86_64/os/
         gpgcheck=1
         enabled=1
-        gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
+        gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-centosofficial
 
         [appstream]
         name=CentOS Stream $releasever - AppStream
-        baseurl=https://dl.rockylinux.org/pub/rocky/8.9/AppStream/x86_64/os/
+        baseurl=https://mirror.centos.org/centos/8-stream/AppStream/x86_64/os/
         gpgcheck=1
         enabled=1
-        gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
+        gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-centosofficial
 
         [extras]
         name=CentOS Stream $releasever - Extras
-        baseurl=https://dl.rockylinux.org/pub/rocky/8.9/extras/x86_64/os/
+        baseurl=https://mirror.centos.org/centos/8-stream/extras/x86_64/os/
         gpgcheck=1
         enabled=1
-        gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
+        gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-centosofficial
 
         [epel]
         name=Extra Packages for Enterprise Linux $releasever - $basearch
@@ -51,12 +51,12 @@ jobs:
         EOF
         
         # Import GPG keys
-        rpm --import https://dl.rockylinux.org/pub/rocky/RPM-GPG-KEY-rockyofficial
+        rpm --import https://www.centos.org/keys/RPM-GPG-KEY-CentOS-Official
         rpm --import https://download.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-8
 
     - name: Install system dependencies
       run: |
-        dnf update -y
+        dnf update -y --nogpgcheck
         dnf install -y dnf-plugins-core
         dnf config-manager --set-enabled powertools
         dnf install -y python38 python38-pip python38-devel gcc gcc-c++ make \
@@ -106,7 +106,7 @@ jobs:
       run: |
         ls -la dist/
         file dist/sb05
-        # Test if executable runs (just version check)
+        # Test if executable runs
         ./dist/sb05 --version || echo "Executable runs but may need VLC at runtime"
 
     - name: Upload executable artifact
@@ -114,36 +114,4 @@ jobs:
       with:
         name: tv-server-executable
         path: srv/tv/dist/sb05
-        retention-days: 30
-
-    - name: Create complete package
-      working-directory: ./srv/tv
-      run: |
-        mkdir -p tv-server-package
-        # Copy all necessary files
-        cp -r videos/ images/ sb05_set.json sb05_wplace.json tv-server-package/
-        cp dist/sb05 tv-server-package/
-        
-        # Create run script
-        cat > tv-server-package/run.sh << 'EOF'
-        #!/bin/bash
-        echo "TV Server"
-        echo "========="
-        echo "Make sure VLC is installed on your system before running."
-        echo "For CentOS/RHEL: sudo dnf install vlc"
-        echo "For Ubuntu/Debian: sudo apt install vlc"
-        echo ""
-        echo "Starting TV server..."
-        chmod +x sb05
-        ./sb05
-        EOF
-        chmod +x tv-server-package/run.sh
-        
-        tar -czf tv-server-package.tar.gz tv-server-package/
-
-    - name: Upload complete package
-      uses: actions/upload-artifact@v4
-      with:
-        name: tv-server-complete-package
-        path: srv/tv/tv-server-package.tar.gz
         retention-days: 30
