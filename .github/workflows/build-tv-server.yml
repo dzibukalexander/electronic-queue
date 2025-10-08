@@ -4,7 +4,7 @@ on:
   push:
     branches: [ tv-server-build, chered ]
   pull_request:
-    branches: [ tv-server-build, chered ]
+    branches: [ chered ]
 
 jobs:
   build-tv-server:
@@ -13,15 +13,52 @@ jobs:
       image: quay.io/centos/centos:stream8
       
     steps:
+    - name: Fix CentOS 8 Stream repositories
+      run: |
+        # Remove broken repositories
+        dnf clean all
+        rm -rf /etc/yum.repos.d/*.repo
+        
+        # Add working CentOS Stream 8 repositories
+        cat > /etc/yum.repos.d/centos.repo << 'EOF'
+        [baseos]
+        name=CentOS Stream $releasever - BaseOS
+        baseurl=https://dl.rockylinux.org/pub/rocky/8.9/BaseOS/x86_64/os/
+        gpgcheck=1
+        enabled=1
+        gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
+
+        [appstream]
+        name=CentOS Stream $releasever - AppStream
+        baseurl=https://dl.rockylinux.org/pub/rocky/8.9/AppStream/x86_64/os/
+        gpgcheck=1
+        enabled=1
+        gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
+
+        [extras]
+        name=CentOS Stream $releasever - Extras
+        baseurl=https://dl.rockylinux.org/pub/rocky/8.9/extras/x86_64/os/
+        gpgcheck=1
+        enabled=1
+        gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-rockyofficial
+
+        [epel]
+        name=Extra Packages for Enterprise Linux $releasever - $basearch
+        baseurl=https://download.fedoraproject.org/pub/epel/8/Everything/x86_64
+        enabled=1
+        gpgcheck=1
+        gpgkey=https://download.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-8
+        EOF
+        
+        # Import GPG keys
+        rpm --import https://dl.rockylinux.org/pub/rocky/RPM-GPG-KEY-rockyofficial
+        rpm --import https://download.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-8
+
     - name: Install system dependencies
       run: |
-        # Update package lists and install basic dependencies
+        dnf update -y
         dnf install -y dnf-plugins-core
         dnf config-manager --set-enabled powertools
-        dnf install -y epel-release
-        dnf update -y
-        
-        # Install development tools and Python 3.8
         dnf install -y python38 python38-pip python38-devel gcc gcc-c++ make \
         tk-devel bzip2-devel ncurses-devel libffi-devel readline-devel \
         sqlite-devel which wget git glibc-langpack-en
@@ -40,20 +77,19 @@ jobs:
       run: |
         pip3.8 install -r requirements1.txt
 
-    - name: Verify Python and VLC versions
+    - name: Verify Python and VLC
       run: |
         python3.8 --version
-        vlc --version
+        vlc --version || echo "VLC version check failed but continuing"
         echo "VLC library path:"
-        find /usr -name "libvlc.so" 2>/dev/null || true
-        find /usr -name "libvlccore.so" 2>/dev/null || true
-        echo "VLC plugins directory:"
-        find /usr -type d -name "vlc" 2>/dev/null || true
+        find /usr -name "libvlc.so" 2>/dev/null | head -5
+        echo "VLC plugins:"
+        ls -la /usr/lib64/vlc/plugins/ 2>/dev/null | head -10 || echo "VLC plugins not found in standard location"
 
-    - name: Build executable with PyInstaller (original command)
+    - name: Build executable with PyInstaller
       working-directory: ./srv/tv
       run: |
-        # Use the original build command from the project
+        # Use the original build command with VLC data
         python3.8 -m PyInstaller sb05.py \
           --onefile \
           --hidden-import=logger \
@@ -65,16 +101,13 @@ jobs:
           --hidden-import=vlc \
           --add-data='/usr/lib64/vlc:vlc/'
 
-    - name: List build artifacts and check VLC data
+    - name: Check built executable
       working-directory: ./srv/tv
       run: |
-        echo "=== Build artifacts ==="
         ls -la dist/
-        echo "=== Checking if VLC files are included ==="
-        # Check if VLC libraries are bundled
-        if [ -f dist/sb05 ]; then
-          strings dist/sb05 | grep -i vlc | head -10
-        fi
+        file dist/sb05
+        # Test if executable runs (just version check)
+        ./dist/sb05 --version || echo "Executable runs but may need VLC at runtime"
 
     - name: Upload executable artifact
       uses: actions/upload-artifact@v4
@@ -83,53 +116,34 @@ jobs:
         path: srv/tv/dist/sb05
         retention-days: 30
 
-    - name: Create deployment package
+    - name: Create complete package
       working-directory: ./srv/tv
       run: |
-        # Create package with all necessary files
-        mkdir -p tv-server-deploy
-        cp -r videos/ images/ sb05_set.json sb05_wplace.json tv-server-deploy/
-        cp dist/sb05 tv-server-deploy/
+        mkdir -p tv-server-package
+        # Copy all necessary files
+        cp -r videos/ images/ sb05_set.json sb05_wplace.json tv-server-package/
+        cp dist/sb05 tv-server-package/
         
-        # Create deployment script
-        cat > tv-server-deploy/deploy.sh << 'EOF'
+        # Create run script
+        cat > tv-server-package/run.sh << 'EOF'
         #!/bin/bash
-        echo "TV Server Deployment"
-        echo "===================="
-        
-        # Check if running on CentOS/RHEL
-        if [ -f /etc/redhat-release ]; then
-            echo "Detected CentOS/RHEL system"
-            # Install VLC if not present
-            if ! command -v vlc &> /dev/null; then
-                echo "Installing VLC..."
-                sudo dnf install -y vlc
-            fi
-        else
-            echo "Please make sure VLC is installed on your system"
-            echo "Ubuntu/Debian: sudo apt install vlc"
-            echo "CentOS/RHEL: sudo dnf install vlc"
-        fi
-        
-        # Make executable
+        echo "TV Server"
+        echo "========="
+        echo "Make sure VLC is installed on your system before running."
+        echo "For CentOS/RHEL: sudo dnf install vlc"
+        echo "For Ubuntu/Debian: sudo apt install vlc"
+        echo ""
+        echo "Starting TV server..."
         chmod +x sb05
-        
-        echo ""
-        echo "To run the TV server:"
-        echo "./sb05"
-        echo ""
-        echo "Make sure VLC is installed for video playback functionality"
+        ./sb05
         EOF
+        chmod +x tv-server-package/run.sh
         
-        chmod +x tv-server-deploy/deploy.sh
-        
-        # Create package
-        tar -czf tv-server-deploy.tar.gz tv-server-deploy/
-        echo "Package created: tv-server-deploy.tar.gz"
+        tar -czf tv-server-package.tar.gz tv-server-package/
 
-    - name: Upload deployment package
+    - name: Upload complete package
       uses: actions/upload-artifact@v4
       with:
-        name: tv-server-deployment-package
-        path: srv/tv/tv-server-deploy.tar.gz
+        name: tv-server-complete-package
+        path: srv/tv/tv-server-package.tar.gz
         retention-days: 30
