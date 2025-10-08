@@ -39,12 +39,6 @@ jobs:
         gpgcheck=0
         enabled=1
 
-        [crb]
-        name=CentOS Stream $releasever - CRB
-        baseurl=http://mirror.hostnet.nl/centos/8-stream/CRB/x86_64/os/
-        gpgcheck=0
-        enabled=1
-
         [epel]
         name=Extra Packages for Enterprise Linux $releasever - $basearch
         baseurl=https://download-ib01.fedoraproject.org/pub/epel/8/Everything/x86_64
@@ -59,19 +53,16 @@ jobs:
       run: |
         dnf update -y
         dnf install -y dnf-plugins-core
-        dnf config-manager --set-enabled crb
         
-        # Install all required dependencies
+        # Install all required dependencies - они доступны в baseos/appstream/epel
         dnf install -y python38 python38-pip python38-devel gcc gcc-c++ make
         dnf install -y bzip2-devel ncurses-devel libffi-devel readline-devel
         dnf install -y sqlite-devel tk-devel which wget git glibc-langpack-en
         dnf install -y libX11-devel libXext-devel libXrender-devel libxcb-devel
-        dnf install -y mesa-libGL-devel libXi-devel libXrandr-devel libXcursor-devel
-        dnf install -y libXcomposite-devel libXdamage-devel libXfixes-devel
-        dnf install -y alsa-lib-devel pulseaudio-libs-devel
+        dnf install -y mesa-libGL-devel libXi-devel
         
         # Install VLC from EPEL
-        dnf install -y vlc vlc-devel vlc-core vlc-plugin-base
+        dnf install -y vlc vlc-devel vlc-core
         
         # Install PyInstaller
         pip3.8 install pyinstaller==6.14.2
@@ -94,9 +85,13 @@ jobs:
         find /usr -name "*vlc*" -type f 2>/dev/null | head -10
         echo "=== VLC Plugins Directory ==="
         ls -la /usr/lib64/vlc/plugins/ 2>/dev/null | head -5 || echo "VLC plugins directory not found"
-        echo "=== Required Dependencies ==="
-        for lib in libbz2 libncurses libffi readline sqlite tk; do
-            find /usr -name "*$lib*" -type f 2>/dev/null | head -1 || echo "$lib not found"
+        echo "=== Checking critical dependencies ==="
+        for pkg in python3-devel gcc tk-devel vlc-devel; do
+            if rpm -q $pkg &>/dev/null; then
+                echo "✓ $pkg installed"
+            else
+                echo "✗ $pkg missing"
+            fi
         done
 
     - name: Build executable with PyInstaller
@@ -108,8 +103,15 @@ jobs:
             import vlc
             print("SUCCESS: vlc imported successfully")
             print(f"vlc module path: {vlc.__file__}")
+            
+            # Test basic VLC functionality
+            instance = vlc.Instance()
+            player = instance.media_player_new()
+            print("SUCCESS: VLC instance and player created")
         except Exception as e:
             print(f"ERROR: Failed to import vlc: {e}")
+            import traceback
+            traceback.print_exc()
         EOF
         python3.8 test_vlc.py
         
