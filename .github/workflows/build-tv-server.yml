@@ -54,15 +54,19 @@ jobs:
         dnf update -y
         dnf install -y dnf-plugins-core
         
-        # Install all required dependencies - они доступны в baseos/appstream/epel
+        # Install all required dependencies
         dnf install -y python38 python38-pip python38-devel gcc gcc-c++ make
         dnf install -y bzip2-devel ncurses-devel libffi-devel readline-devel
         dnf install -y sqlite-devel tk-devel which wget git glibc-langpack-en
         dnf install -y libX11-devel libXext-devel libXrender-devel libxcb-devel
         dnf install -y mesa-libGL-devel libXi-devel
         
-        # Install VLC from EPEL
-        dnf install -y vlc vlc-devel vlc-core
+        # Install RPM Fusion for VLC (free and non-free)
+        dnf install -y https://download1.rpmfusion.org/free/el/rpmfusion-free-release-8.noarch.rpm
+        dnf install -y https://download1.rpmfusion.org/nonfree/el/rpmfusion-nonfree-release-8.noarch.rpm
+        
+        # Install VLC from RPM Fusion
+        dnf install -y vlc vlc-devel
         
         # Install PyInstaller
         pip3.8 install pyinstaller==6.14.2
@@ -73,6 +77,8 @@ jobs:
     - name: Install Python dependencies
       working-directory: ./srv/tv
       run: |
+        # First install python-vlc separately to ensure it works
+        pip3.8 install python-vlc==3.0.21203
         pip3.8 install -r requirements1.txt
 
     - name: Verify environment
@@ -86,7 +92,7 @@ jobs:
         echo "=== VLC Plugins Directory ==="
         ls -la /usr/lib64/vlc/plugins/ 2>/dev/null | head -5 || echo "VLC plugins directory not found"
         echo "=== Checking critical dependencies ==="
-        for pkg in python3-devel gcc tk-devel vlc-devel; do
+        for pkg in python3-devel gcc tk-devel vlc vlc-devel; do
             if rpm -q $pkg &>/dev/null; then
                 echo "✓ $pkg installed"
             else
@@ -94,28 +100,40 @@ jobs:
             fi
         done
 
-    - name: Build executable with PyInstaller
+    - name: Test VLC Python integration
       working-directory: ./srv/tv
       run: |
-        # Create a test script to verify Python can import vlc
-        cat > test_vlc.py << 'EOF'
+        cat > test_vlc_detailed.py << 'EOF'
         try:
             import vlc
             print("SUCCESS: vlc imported successfully")
             print(f"vlc module path: {vlc.__file__}")
             
             # Test basic VLC functionality
-            instance = vlc.Instance()
+            instance = vlc.Instance(['--no-xlib', '--ignore-config'])
+            print("SUCCESS: VLC instance created")
+            
             player = instance.media_player_new()
-            print("SUCCESS: VLC instance and player created")
+            print("SUCCESS: VLC media player created")
+            
+            # Test finding VLC libraries
+            import ctypes
+            try:
+                vlc_lib = ctypes.CDLL('libvlc.so.5')
+                print("SUCCESS: libvlc.so.5 found")
+            except Exception as e:
+                print(f"WARNING: libvlc.so.5 not found: {e}")
+                
         except Exception as e:
-            print(f"ERROR: Failed to import vlc: {e}")
+            print(f"ERROR: VLC test failed: {e}")
             import traceback
             traceback.print_exc()
         EOF
-        python3.8 test_vlc.py
-        
-        # Use the original build command with VLC data
+        python3.8 test_vlc_detailed.py
+
+    - name: Build executable with PyInstaller
+      working-directory: ./srv/tv
+      run: |
         echo "Starting PyInstaller build..."
         python3.8 -m PyInstaller sb05.py \
           --onefile \
@@ -147,41 +165,4 @@ jobs:
       with:
         name: tv-server-executable
         path: srv/tv/dist/sb05
-        retention-days: 30
-
-    - name: Create deployment package
-      working-directory: ./srv/tv
-      run: |
-        mkdir -p tv-server-deploy
-        cp -r videos/ images/ sb05_set.json sb05_wplace.json tv-server-deploy/
-        cp dist/sb05 tv-server-deploy/
-        
-        # Create installation script
-        cat > tv-server-deploy/install_deps.sh << 'EOF'
-        #!/bin/bash
-        echo "Installing dependencies for TV Server..."
-        
-        if command -v dnf &> /dev/null; then
-            echo "Detected CentOS/RHEL system"
-            sudo dnf install -y vlc python38 tkinter
-        elif command -v apt &> /dev/null; then
-            echo "Detected Ubuntu/Debian system"
-            sudo apt update
-            sudo apt install -y vlc python3 tk
-        else
-            echo "Please install VLC and Python 3.8 manually"
-        fi
-        EOF
-        
-        chmod +x tv-server-deploy/install_deps.sh
-        chmod +x tv-server-deploy/sb05
-        
-        tar -czf tv-server-deploy.tar.gz tv-server-deploy/
-        echo "Deployment package created: tv-server-deploy.tar.gz"
-
-    - name: Upload deployment package
-      uses: actions/upload-artifact@v4
-      with:
-        name: tv-server-deployment-package
-        path: srv/tv/tv-server-deploy.tar.gz
         retention-days: 30
